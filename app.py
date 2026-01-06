@@ -1,3 +1,5 @@
+# Importing the necessary libraries
+
 import os
 import re
 from dotenv import load_dotenv
@@ -10,26 +12,14 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 load_dotenv()
 
-# =============================================================================
-# INPUT VALIDATION
-# =============================================================================
+# Input Validation: It rejects very short input, highly repetitive spam, and queries that contain no recognizable vocabulary related to books or general language.
 
 def validate_query(query: str) -> tuple[bool, str]:
-    """
-    Validates user query to catch edge cases.
-
-    Returns:
-        (is_valid, error_message)
-    """
     clean = query.strip()
-
-    # Check minimum length
     if len(clean) < 3:
         return False, "Query too short. Please describe the book you want."
 
     words = clean.lower().split()
-
-    # Check for excessive repetition (spam detection)
     if len(words) > 10:
         unique_ratio = len(set(words)) / len(words)
         if unique_ratio < 0.3:
@@ -37,124 +27,29 @@ def validate_query(query: str) -> tuple[bool, str]:
                 False,
                 "Your query seems repetitive. Please describe what you're looking for more naturally.",
             )
-
-    # Gibberish detection - must have at least one common word
     common_words = {
-        # Basic words
-        "a",
-        "an",
-        "the",
-        "and",
-        "or",
-        "but",
-        "in",
-        "on",
-        "at",
-        "to",
-        "for",
-        "of",
-        "with",
-        "about",
-        "is",
-        "are",
-        "was",
-        "were",
-        "be",
-        "been",
-        "have",
-        "has",
-        "had",
-        "do",
-        "does",
-        "did",
-        "will",
-        "would",
-        "could",
-        "should",
-        "can",
-        "may",
-        "might",
-        "must",
-        # Book-related
-        "book",
-        "books",
-        "story",
-        "stories",
-        "novel",
-        "fiction",
-        "read",
-        "reading",
-        "author",
-        "writer",
-        "character",
-        "characters",
-        "plot",
-        "genre",
-        # Genre terms
-        "mystery",
-        "romance",
-        "fantasy",
-        "science",
-        "detective",
-        "love",
-        "adventure",
-        "thriller",
-        "horror",
-        "historical",
-        "biography",
-        "war",
-        "family",
-        "life",
-        "death",
-        "journey",
-        "quest",
-        "magic",
-        "space",
-        "time",
-        "world",
-        "man",
-        "woman",
-        "child",
-        "children",
-        "hero",
-        "villain",
-        "dark",
-        "light",
-        "new",
-        "old",
-        "find",
-        "looking",
-        "want",
-        "need",
-        "like",
-        "search",
-        "recommend",
-        # Scientific/technical terms
-        "physics",
-        "quantum",
-        "chemistry",
-        "biology",
-        "mathematics",
-        "math",
-        "theory",
-        "atom",
-        "molecule",
-        "equation",
-        "experiment",
-        "particle",
-        "research",
-        "study",
-        "analysis",
-        "data",
-        "algorithm",
-        "computing",
-        "boson",
-        "collider",
-        "neutrino",
-        "cosmos",
-        "relativity",
-        "evolution",
-    }
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "about",
+
+    "is", "are", "was", "were", "be", "been", "have", "has", "had",
+    "do", "does", "did", "will", "would", "could", "should", "can", "may", "might", "must",
+
+    "book", "books", "story", "stories", "novel", "fiction", "read", "reading",
+    "author", "writer", "character", "characters", "plot", "genre",
+
+    "mystery", "romance", "fantasy", "science", "detective", "love", "adventure",
+    "thriller", "horror", "historical", "biography", "war", "family", "life",
+    "death", "journey", "quest", "magic", "space", "time", "world",
+
+    "man", "woman", "child", "children", "hero", "villain", "dark", "light",
+    "new", "old",
+
+    "find", "looking", "want", "need", "like", "search", "recommend",
+
+    "physics", "quantum", "chemistry", "biology", "mathematics", "math", "theory",
+    "atom", "molecule", "equation", "experiment", "particle", "research", "study",
+    "analysis", "data", "algorithm", "computing", "boson", "collider",
+    "neutrino", "cosmos", "relativity", "evolution",
+}
 
     if len(words) >= 2:
         has_common = any(w in common_words for w in words)
@@ -163,297 +58,118 @@ def validate_query(query: str) -> tuple[bool, str]:
                 False,
                 "We couldn't understand your query. Please use regular words to describe the book.",
             )
-
     return True, ""
 
-
-# =============================================================================
-# CONTRADICTION DETECTION
-# =============================================================================
+# Contradiction Detection: Warn when the query conflicts with the selected category or tone.
 
 INCOMPATIBLE_PAIRS = [
-    (
-        "Romance",
-        [
-            "corporate thriller",
-            "bank",
-            "corruption",
-            "financial crisis",
-            "serial killer",
-            "murder mystery",
-            "detective",
-            "investigation",
-            "space opera",
-            "alien invasion",
-            "dystopia",
-            "war strategy",
-            "quantum physics",
-            "mathematics",
-            "scientific theory",
-            "horror",
-            "demon",
-            "terrifying",
-            "haunted",
-        ],
-    ),
-    (
-        "Children & YA",
-        [
-            "corporate",
-            "erotic",
-            "explicit",
-            "graphic violence",
-            "gore",
-            "serial killer",
-            "brutal",
-            "torture",
-            "sexual content",
-            "financial markets",
-            "stock trading",
-            "business strategy",
-            "philosophical treatise",
-            "academic",
-            "dense theory",
-            "adult thriller",
-            "noir",
-        ],
-    ),
-    (
-        "Science & Ideas",
-        [
-            "romance",
-            "love story",
-            "romantic comedy",
-            "dating",
-            "detective story",
-            "murder mystery",
-            "crime thriller",
-            "fantasy quest",
-            "magic system",
-            "dragon",
-            "wizard",
-            "space battles",
-            "alien invasion",
-            "horror",
-            "scary",
-            "terrifying",
-        ],
-    ),
-    (
-        "Mystery & Thriller",
-        [
-            "peaceful village",
-            "gentle humor",
-            "cozy",
-            "heartwarming",
-            "self-help",
-            "meditation",
-            "spiritual journey",
-            "romantic comedy",
-            "lighthearted romance",
-            "children's bedtime story",
-            "picture book",
-        ],
-    ),
-    (
-        "Fantasy & Sci-Fi",
-        [
-            "realistic",
-            "true story",
-            "memoir",
-            "autobiography",
-            "historical accuracy",
-            "documentary",
-            "self-help guide",
-            "business manual",
-            "how-to",
-            "textbook",
-            "academic study",
-        ],
-    ),
-    (
-        "History & Biography",
-        [
-            "fantasy",
-            "magic",
-            "dragons",
-            "wizards",
-            "science fiction",
-            "alien",
-            "space travel",
-            "time machine",
-            "fictional character",
-            "imaginary world",
-        ],
-    ),
-    (
-        "Self-Help & Business",
-        [
-            "fiction",
-            "novel",
-            "story",
-            "narrative",
-            "fantasy adventure",
-            "mystery plot",
-            "thriller",
-            "science fiction",
-            "horror story",
-            "children's tale",
-            "fairy tale",
-        ],
-    ),
-    (
-        "Literary & Contemporary",
-        [
-            "self-help tips",
-            "business strategy",
-            "how-to guide",
-            "textbook",
-            "manual",
-            "instruction",
-        ],
-    ),
+    ("Romance", [
+        "corporate thriller", "bank", "corruption", "financial crisis",
+        "serial killer", "murder mystery", "detective", "investigation",
+        "space opera", "alien invasion", "dystopia", "war strategy",
+        "quantum physics", "mathematics", "scientific theory",
+        "horror", "demon", "terrifying",
+    ]),
+
+    ("Children & YA", [
+        "corporate", "erotic", "explicit", "graphic violence", "gore",
+        "serial killer", "brutal", "torture", "sexual content",
+        "financial markets", "stock trading", "business strategy",
+        "philosophical treatise", "academic", "dense theory",
+        "adult thriller", "noir",
+    ]),
+
+    ("Science & Ideas", [
+        "romance", "love story", "romantic comedy", "dating",
+        "detective story", "murder mystery", "crime thriller",
+        "fantasy quest", "magic system", "dragon", "wizard",
+        "space battles", "alien invasion",
+        "horror", "scary", "terrifying",
+    ]),
+
+    ("Mystery & Thriller", [
+        "peaceful village", "gentle humor", "cozy", "heartwarming",
+        "self-help", "meditation", "spiritual journey",
+        "romantic comedy", "lighthearted romance",
+        "children's bedtime story", "picture book",
+    ]),
+
+    ("Fantasy & Sci-Fi", [
+        "realistic", "true story", "memoir", "autobiography",
+        "historical accuracy", "documentary",
+        "self-help guide", "business manual", "how-to",
+        "textbook", "academic study",
+    ]),
+
+    ("History & Biography", [
+        "fantasy", "magic", "dragons", "wizards",
+        "science fiction", "alien", "space travel",
+        "time machine", "fictional character", "imaginary world",
+    ]),
+
+    ("Self-Help & Business", [
+        "fiction", "novel", "story", "narrative",
+        "fantasy adventure", "mystery plot", "thriller",
+        "science fiction", "horror story",
+        "children's tale", "fairy tale",
+    ]),
+
+    ("Literary & Contemporary", [
+        "self-help tips", "business strategy", "how-to guide",
+        "textbook", "manual", "instruction",
+    ]),
 ]
 
 TONE_CONTRADICTIONS = [
-    (
-        "Happy",
-        [
-            "murder",
-            "death",
-            "killing",
-            "tragedy",
-            "grief",
-            "loss",
-            "depression",
-            "suicide",
-            "apocalypse",
-            "war",
-            "genocide",
-            "torture",
-            "abuse",
-            "horror",
-            "terrifying",
-            "brutal",
-            "dark",
-            "bleak",
-            "hopeless",
-            "despair",
-        ],
-    ),
-    (
-        "Sad",
-        [
-            "comedy",
-            "hilarious",
-            "funny",
-            "humor",
-            "laughing",
-            "uplifting",
-            "joyful",
-            "celebration",
-            "triumph",
-            "happy ending",
-            "feel-good",
-            "lighthearted",
-        ],
-    ),
-    (
-        "Calm",
-        [
-            "intense",
-            "thrilling",
-            "action-packed",
-            "explosive",
-            "fast-paced",
-            "adrenaline",
-            "battle",
-            "war",
-            "horror",
-            "terrifying",
-            "shocking",
-            "brutal",
-            "serial killer",
-            "murder spree",
-            "violent",
-        ],
-    ),
-    (
-        "Intense",
-        [
-            "peaceful",
-            "calm",
-            "gentle",
-            "relaxing",
-            "meditative",
-            "quiet",
-            "slow-paced",
-            "contemplative",
-            "serene",
-            "cozy",
-            "comfortable",
-            "soothing",
-        ],
-    ),
-    (
-        "Dark",
-        [
-            "uplifting",
-            "hopeful",
-            "optimistic",
-            "joyful",
-            "lighthearted",
-            "cheerful",
-            "bright",
-            "positive",
-            "feel-good",
-            "heartwarming",
-            "inspiring",
-        ],
-    ),
-    (
-        "Hopeful",
-        [
-            "hopeless",
-            "despair",
-            "bleak",
-            "nihilistic",
-            "pointless",
-            "meaningless",
-            "futile",
-            "doomed",
-            "inevitable doom",
-        ],
-    ),
-    (
-        "Wholesome",
-        [
-            "graphic violence",
-            "gore",
-            "brutal",
-            "torture",
-            "horror",
-            "terrifying",
-            "disturbing",
-            "explicit",
-            "dark",
-            "gritty",
-        ],
-    ),
+    ("Happy", [
+        "murder", "death", "killing", "tragedy", "grief", "loss",
+        "depression", "suicide", "apocalypse", "war", "genocide",
+        "torture", "abuse", "horror", "terrifying",
+        "brutal", "dark", "bleak", "hopeless", "despair",
+    ]),
+
+    ("Sad", [
+        "comedy", "hilarious", "funny", "humor", "laughing",
+        "uplifting", "joyful", "celebration", "triumph",
+        "happy ending", "feel-good", "lighthearted",
+    ]),
+
+    ("Calm", [
+        "intense", "thrilling", "action-packed", "explosive",
+        "fast-paced", "adrenaline", "battle", "war",
+        "horror", "terrifying", "shocking", "brutal",
+        "serial killer", "murder spree", "violent",
+    ]),
+
+    ("Intense", [
+        "peaceful", "calm", "gentle", "relaxing", "meditative",
+        "quiet", "slow-paced", "contemplative", "serene",
+        "cozy", "comfortable", "soothing",
+    ]),
+
+    ("Dark", [
+        "uplifting", "hopeful", "optimistic", "joyful",
+        "lighthearted", "cheerful", "bright", "positive",
+        "feel-good", "heartwarming", "inspiring",
+    ]),
+
+    ("Hopeful", [
+        "hopeless", "despair", "bleak", "nihilistic",
+        "pointless", "meaningless", "futile",
+        "doomed", "inevitable doom",
+    ]),
+
+    ("Wholesome", [
+        "graphic violence", "gore", "brutal", "torture",
+        "horror", "terrifying", "disturbing",
+        "explicit", "dark", "gritty",
+    ]),
 ]
 
-
 def check_contradictions(query: str, category: str, tone: str) -> str:
-    """
-    Detects contradictory user inputs (e.g., "murder mystery" + "Romance" category).
-
-    Returns:
-        Warning message string, or empty string if no contradictions.
-    """
     warnings = []
     query_lower = query.lower()
 
-    # Check category contradictions
     if category != "All":
         for cat, keywords in INCOMPATIBLE_PAIRS:
             if category == cat:
@@ -466,7 +182,6 @@ def check_contradictions(query: str, category: str, tone: str) -> str:
                 if warnings:
                     break
 
-    # Check tone contradictions
     if tone != "All":
         for tone_name, keywords in TONE_CONTRADICTIONS:
             if tone == tone_name:
@@ -481,133 +196,83 @@ def check_contradictions(query: str, category: str, tone: str) -> str:
 
     return " ".join(warnings[:2])  # Max 2 warnings
 
-
-# =============================================================================
-# CATEGORY CLASSIFICATION
-# =============================================================================
+# Category Classification: Mapping raw category strings to a fixed set of book categories.
 
 def classify_category(raw_category):
-    """
-    Rule-based category mapper - deterministic and fast.
-
-    Handles:
-    - Multi-part categories (e.g., "Fiction / Mystery / Thriller")
-    - YA override (Children's books take precedence)
-    - False positive prevention (e.g., "Political Science" ≠ Sci-Fi)
-
-    Returns:
-        One of 9 standard categories
-    """
     if raw_category is None or pd.isna(raw_category):
         return "Other"
 
-    # Normalize and split on common delimiters
     cat = str(raw_category).lower()
-    parts = re.split(r"[\/;,>|]", cat)
-    parts = [p.strip() for p in parts if p.strip()]
+    parts = [p.strip() for p in re.split(r"[\/;,>|]", cat) if p.strip()]
 
     # Detection flags
-    has_ya = False
-    has_mystery = False
-    has_romance = False
-    has_fantasy = False
-    has_scifi = False
-    has_horror = False
-    has_history = False
-    has_bio = False
-    has_business = False
-    has_science_nonfiction = False
-    has_fiction_tag = False
-    has_literary = False
+    has_ya = has_mystery = has_romance = has_fantasy = False
+    has_scifi = has_horror = has_history = has_bio = False
+    has_business = has_science_nonfiction = False
+    has_fiction_tag = has_literary = False
 
-    # Scan all parts
     for p in parts:
-        if any(
-            x in p for x in ["young adult", "ya", "juvenile", "children", "childrens"]
-        ):
+        if any(x in p for x in ("young adult", "ya", "juvenile", "children", "childrens")):
             has_ya = True
-        if any(
-            x in p
-            for x in ["mystery", "thriller", "crime", "detective", "suspense", "noir"]
-        ):
+
+        if any(x in p for x in ("mystery", "thriller", "crime", "detective", "suspense", "noir")):
             has_mystery = True
+
         if "horror" in p:
             has_horror = True
-            has_mystery = True  # Horror buckets into thriller
+            has_mystery = True  # Bucket horror into thriller
+
         if "fantasy" in p:
             has_fantasy = True
-        if any(
-            x in p
-            for x in [
-                "sci-fi",
-                "science fiction",
-                "space opera",
-                "space adventure",
-                "dystopian",
-                "cyberpunk",
-            ]
-        ):
+
+        if any(x in p for x in (
+            "sci-fi", "science fiction", "space opera",
+            "space adventure", "dystopian", "cyberpunk"
+        )):
             has_scifi = True
+
         if "romance" in p:
             has_romance = True
-        if any(x in p for x in ["history", "historical"]):
+
+        if any(x in p for x in ("history", "historical")):
             has_history = True
-        if any(x in p for x in ["biography", "autobiography", "memoir"]):
+
+        if any(x in p for x in ("biography", "autobiography", "memoir")):
             has_bio = True
-        if any(
-            x in p
-            for x in [
-                "business",
-                "self-help",
-                "self help",
-                "management",
-                "finance",
-                "economics",
-            ]
-        ):
+
+        if any(x in p for x in (
+            "business", "self-help", "self help",
+            "management", "finance", "economics"
+        )):
             has_business = True
-        if any(
-            x in p
-            for x in [
-                "philosophy",
-                "psychology",
-                "religion",
-                "mathematics",
-                "physics",
-                "chemistry",
-                "astronomy",
-                "biology",
-                "neuroscience",
-            ]
-        ):
-            if "fiction" not in p:  # Avoid misclassifying sci-fi
-                has_science_nonfiction = True
+
+        if any(x in p for x in (
+            "philosophy", "psychology", "religion",
+            "mathematics", "physics", "chemistry",
+            "astronomy", "biology", "neuroscience"
+        )) and "fiction" not in p:
+            has_science_nonfiction = True
+
         if "fiction" in p:
             has_fiction_tag = True
-        if any(
-            x in p
-            for x in [
-                "literary",
-                "contemporary",
-                "classic",
-                "drama",
-                "poetry",
-                "literature",
-            ]
-        ):
+
+        if any(x in p for x in (
+            "literary", "contemporary", "classic",
+            "drama", "poetry", "literature"
+        )):
             has_literary = True
 
-    # Category decision logic (priority order matters)
+    # Priority-based category resolution
     if has_ya:
         return "Children & YA"
-    if has_mystery or has_horror:
+    if has_mystery:
         return "Mystery & Thriller"
     if has_romance:
         return "Romance"
     if has_fantasy or has_scifi:
-        # Prevent false positives like "Political Science"
+        # Avoid false positives like "Political Science"
         if "science" in cat and not ("fiction" in cat or "sci-fi" in cat):
-            pass  # Not actually sci-fi
+            pass
         else:
             return "Fantasy & Sci-Fi"
     if has_history or has_bio:
@@ -621,33 +286,25 @@ def classify_category(raw_category):
 
     return "Other"
 
-
-# =============================================================================
-# DATA LOADING
-# =============================================================================
+# Data Loading
 
 ENRICHED_FILE = "books_enriched_production.csv"
 
 if os.path.exists(ENRICHED_FILE):
     books = pd.read_csv(ENRICHED_FILE)
 else:
-    # First run - process raw data
     books = pd.read_csv("books_with_emotions.csv")
     books["category"] = books["categories"].apply(classify_category)
     books.to_csv(ENRICHED_FILE, index=False)
 
-print(f"✔ Loaded {len(books)} books")
+print(f"Loaded {len(books)} books")
 
-# Prepare thumbnails
 books["large_thumbnail"] = books["thumbnail"].astype(str) + "&fife=w800"
 books["large_thumbnail"] = books["large_thumbnail"].replace(
     {"nan&fife=w800": "cover-not-found.jpg"}
 )
 
-
-# =============================================================================
-# VECTOR DATABASE
-# =============================================================================
+# Vector Database
 
 api_key = os.getenv("GOOGLE_API_KEY")
 
@@ -663,19 +320,10 @@ embeddings = GoogleGenerativeAIEmbeddings(
 db_books = Chroma(
     persist_directory="chroma_books_Database", embedding_function=embeddings
 )
-print("✔ Vector DB ready")
+print("Vector DB ready")
 
+# Scoring & Retrieval: Computing tone match using weighted emotion profiles.
 
-# =============================================================================
-# SCORING & RETRIEVAL
-# =============================================================================
-
-
-# =============================================================================
-# SCORING & RETRIEVAL
-# =============================================================================
-
-# Tone profiles - emotion weight blends for nuanced matching
 TONE_PROFILES = {
     "Happy": {
         "joy": 0.8,
@@ -713,18 +361,7 @@ TONE_PROFILES = {
     },
 }
 
-
 def compute_tone_score(row, tone):
-    """
-    Compute tone match using weighted emotion profiles.
-    
-    Args:
-        row: Book row with emotion columns (joy, sadness, anger, fear, surprise, neutral)
-        tone: Selected tone name
-    
-    Returns:
-        Weighted tone similarity score (0-1)
-    """
     if tone == "All" or tone not in TONE_PROFILES:
         return 0.5
     
@@ -742,23 +379,18 @@ def compute_tone_score(row, tone):
     return score / weight_sum if weight_sum > 0 else 0.5
 
 def compute_metadata_score(row, category, tone):
-    """Compute category + tone match score using weighted emotion profiles."""
     selected_cat = row.get("category", "Other")
 
-    # Category score
     if category and category != "All":
         cat_score = 0.90 if selected_cat == category else 0.30
     else:
         cat_score = 0.70
 
-    # Tone score (using emotion blend)
     tone_score = compute_tone_score(row, tone)
 
     return 0.4 * cat_score + 0.6 * tone_score
 
-
 def compute_keyword_boost(desc, query):
-    """Simple keyword matching with stemming."""
     if pd.isna(desc):
         return 0.0
 
@@ -769,7 +401,6 @@ def compute_keyword_boost(desc, query):
     for t in terms:
         if len(t) <= 2:
             continue
-        # Match word stems (crude stemming by dropping last char)
         pattern = r"\b" + re.escape(t[:-1]) + r"\w*\b"
         if re.search(pattern, desc):
             score += 1
@@ -778,21 +409,12 @@ def compute_keyword_boost(desc, query):
 
 
 def retrieve_recommendations(query, category, tone, top_k=16):
-    """
-    Main retrieval function - semantic search + filtering + ranking.
-
-    Returns:
-        (results_dataframe, error_message)
-    """
-    # Validate input
     is_valid, error_msg = validate_query(query)
     if not is_valid:
         return pd.DataFrame(), error_msg
 
-    # Semantic search with Chroma
     results = db_books.similarity_search_with_relevance_scores(query, k=800)
 
-    # Extract ISBNs and scores
     sem_scores = {}
     isbn_list = []
     for doc, score in results:
@@ -803,13 +425,11 @@ def retrieve_recommendations(query, category, tone, top_k=16):
         except:
             continue
 
-    # Get matching books
     results_df = books[books["isbn13"].isin(isbn_list)].copy()
 
     if results_df.empty:
         return results_df, ""
 
-    # Normalize semantic scores to 0-1
     results_df["semantic"] = results_df["isbn13"].map(sem_scores).fillna(0)
     sem_min, sem_max = results_df["semantic"].min(), results_df["semantic"].max()
     results_df["semantic_norm"] = (
@@ -818,7 +438,6 @@ def retrieve_recommendations(query, category, tone, top_k=16):
         else 0.5
     )
 
-    # Compute metadata and keyword scores
     results_df["meta"] = results_df.apply(
         lambda r: compute_metadata_score(r, category, tone), axis=1
     )
@@ -826,16 +445,13 @@ def retrieve_recommendations(query, category, tone, top_k=16):
         lambda d: compute_keyword_boost(d, query)
     )
 
-    # Final weighted score
     if category and category != "All":
-        # Higher weight on metadata when category is specified
         results_df["final_score"] = (
             0.75 * results_df["semantic_norm"]
             + 0.15 * results_df["meta"]
             + 0.10 * results_df["keyword"]
         )
     else:
-        # Prioritize semantic similarity when no category filter
         results_df["final_score"] = (
             0.85 * results_df["semantic_norm"]
             + 0.05 * results_df["meta"]
@@ -844,25 +460,17 @@ def retrieve_recommendations(query, category, tone, top_k=16):
 
     return results_df.sort_values("final_score", ascending=False).head(top_k), ""
 
-
-# =============================================================================
-# GRADIO UI
-# =============================================================================
+# Gradio UI
 
 current_recommendations = []
 
-
 def search_books(query, category, tone):
-    """UI callback for search button."""
     global current_recommendations
 
-    # Check for contradictions
     warning = check_contradictions(query, category, tone)
 
-    # Get recommendations
     df, error_msg = retrieve_recommendations(query, category, tone)
 
-    # Handle errors
     if error_msg:
         gr.Warning(error_msg)
         return [None] * 16
@@ -870,10 +478,8 @@ def search_books(query, category, tone):
     if warning:
         gr.Warning(warning)
 
-    # Store results
     current_recommendations = df.reset_index(drop=True)
 
-    # Return thumbnail images
     imgs = []
     for i in range(16):
         if i < len(df):
@@ -884,7 +490,6 @@ def search_books(query, category, tone):
 
 
 def show_details(index):
-    """UI callback for clicking a book thumbnail."""
     idx = int(index)
     if idx >= len(current_recommendations):
         return [None, "", "", "", "", "", "", "", gr.update(visible=False)]
@@ -899,14 +504,12 @@ def show_details(index):
     year_md = f"**Published:** {int(row['published_year']) if pd.notna(row['published_year']) else 'Unknown'}"
     category_md = f"**Category:** {row['category']}"
 
-    # Truncate long descriptions
     desc = str(row.get("description", ""))
     wc = len(desc.split())
     if wc > 200:
         desc = " ".join(desc.split()[:200]) + f"...\n\n*({wc} words total)*"
     description_md = f"### Description\n{desc}"
 
-    # Show scoring breakdown
     relevance_md = f"""
 ### Relevance Breakdown
 - **Semantic Similarity:** {row['semantic_norm']:.3f}
@@ -926,12 +529,11 @@ def show_details(index):
         gr.update(visible=True),
     )
 
-# Build UI
 categories = ["All"] + sorted(books["category"].dropna().unique())
 tones = ["All", "Happy", "Sad", "Calm", "Intense", "Dark", "Hopeful", "Wholesome"]
 
 with gr.Blocks(theme=gr.themes.Ocean()) as app:
-    gr.Markdown("# StorySense: Where Your Next Book Finds You")
+    gr.Markdown("# LitMatch: Where Your Next Book Finds You")
 
     with gr.Row():
         query_box = gr.Textbox(
@@ -945,7 +547,6 @@ with gr.Blocks(theme=gr.themes.Ocean()) as app:
         tone_select = gr.Dropdown(choices=tones, label="Tone", value="All", scale=1)
         search_btn = gr.Button("Search", variant="primary", scale=1)
 
-    # Results grid
     with gr.Row():
         result_images = []
         for i in range(16):
@@ -958,7 +559,6 @@ with gr.Blocks(theme=gr.themes.Ocean()) as app:
             )
             result_images.append(img)
 
-    # Detail panel (hidden by default)
     with gr.Column(visible=False) as detail_panel:
         gr.Markdown("## Book Details")
 
@@ -981,7 +581,6 @@ with gr.Blocks(theme=gr.themes.Ocean()) as app:
 
         detail_relevance = gr.Markdown()
 
-    # Wire up events
     search_btn.click(
         fn=search_books,
         inputs=[query_box, category_select, tone_select],
@@ -992,24 +591,13 @@ with gr.Blocks(theme=gr.themes.Ocean()) as app:
         img.select(
             fn=lambda idx=i: show_details(idx),
             inputs=[],
-            outputs=[
-                detail_cover,
-                detail_title,
-                detail_authors,
-                detail_rating,
-                detail_year,
-                detail_category,
-                detail_description,
-                detail_relevance,
-                detail_panel,
-            ],
+            outputs=[ detail_cover, detail_title, detail_authors, detail_rating, detail_year, detail_category, detail_description, detail_relevance, detail_panel,],
         )
-
-
+    
 if __name__ == "__main__":
     app.launch(
-        server_name="0.0.0.0",  # Allows external access
+        server_name="0.0.0.0",
         server_port=7860,
-        share=False,  # HF Spaces handles sharing
-        show_error=True,  # Show detailed errors
+        share=False,
+        show_error=True,
     )
