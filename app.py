@@ -17,6 +17,7 @@ load_dotenv()
 # UX Validation (NOT ranking logic)
 # ===============================
 
+
 def validate_query(query: str) -> tuple[bool, str]:
     """Minimal UX validation. Does not affect ranking."""
     clean = query.strip()
@@ -35,9 +36,11 @@ def validate_query(query: str) -> tuple[bool, str]:
 
     return True, ""
 
+
 # ===============================
 # UX Warnings (intentionally minimal)
 # ===============================
+
 
 def check_contradictions(query: str, category: str, tone: str) -> str:
     """
@@ -47,9 +50,11 @@ def check_contradictions(query: str, category: str, tone: str) -> str:
     """
     return ""
 
+
 # ===============================
 # Category Classification (OFFLINE)
 # ===============================
+
 
 def classify_category(raw_category):
     """Run once during preprocessing. Never at runtime."""
@@ -74,6 +79,7 @@ def classify_category(raw_category):
         return "Science & Ideas"
 
     return "Literary & Contemporary"
+
 
 # ===============================
 # Data Loading (Preprocessed)
@@ -123,7 +129,10 @@ TONE_PROFILES = {
     "Calm": {"neutral": 1.0},
     "Dark": {"fear": 0.6, "sadness": 0.4},
     "Intense": {"anger": 0.5, "fear": 0.5},
+    "Hopeful": {"joy": 0.6, "neutral": 0.4},
+    "Wholesome": {"joy": 0.7, "neutral": 0.3},
 }
+
 
 def compute_tone_score(row, tone):
     if tone == "All" or tone not in TONE_PROFILES:
@@ -133,9 +142,11 @@ def compute_tone_score(row, tone):
     score = sum(row.get(e, 0.5) * w for e, w in profile.items())
     return score / sum(profile.values())
 
+
 # ===============================
 # Keyword Boost (Exact-match tiebreaker)
 # ===============================
+
 
 def compute_keyword_boost(desc, query):
     """
@@ -154,9 +165,11 @@ def compute_keyword_boost(desc, query):
     matches = sum(1 for t in terms if t in desc_lower)
     return min(0.2, matches * 0.05)
 
+
 # ===============================
 # Core Retrieval & Scoring
 # ===============================
+
 
 def retrieve_recommendations(query, category, tone, top_k=16):
     is_valid, error_msg = validate_query(query)
@@ -195,16 +208,12 @@ def retrieve_recommendations(query, category, tone, top_k=16):
         df["category_match"] = 0.0
 
     # ---- Keyword boost ----
-    df["keyword"] = df["description"].apply(
-        lambda d: compute_keyword_boost(d, query)
-    )
+    df["keyword"] = df["description"].apply(lambda d: compute_keyword_boost(d, query))
 
     # ---- Final score ----
     if category == "All":
         df["final_score"] = (
-            0.85 * df["semantic"]
-            + 0.10 * df["tone"]
-            + 0.05 * df["keyword"]
+            0.85 * df["semantic"] + 0.10 * df["tone"] + 0.05 * df["keyword"]
         )
     else:
         df["final_score"] = (
@@ -216,11 +225,13 @@ def retrieve_recommendations(query, category, tone, top_k=16):
 
     return df.sort_values("final_score", ascending=False).head(top_k), ""
 
+
 # ===============================
 # Gradio UI
 # ===============================
 
 current_recommendations = []
+
 
 def search_books(query, category, tone):
     global current_recommendations
@@ -236,10 +247,8 @@ def search_books(query, category, tone):
         gr.Warning(warning)
 
     current_recommendations = df.reset_index(drop=True)
-    return [
-        df.iloc[i]["large_thumbnail"] if i < len(df) else None
-        for i in range(16)
-    ]
+    return [df.iloc[i]["large_thumbnail"] if i < len(df) else None for i in range(16)]
+
 
 def show_details(index):
     idx = int(index)
@@ -258,6 +267,7 @@ def show_details(index):
         f"### Description\n{row.get('description','')[:800]}...",
         gr.update(visible=True),
     )
+
 
 # ===============================
 # Launch App
