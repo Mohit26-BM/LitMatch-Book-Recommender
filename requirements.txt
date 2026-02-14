@@ -1,8 +1,8 @@
 gradio==5.49.1
 pandas==2.2.2
-python-dotenv==0.21.0
 langchain==0.3.27
 langchain-community==0.3.29
 langchain-chroma==0.2.6
 chromadb==1.0.21
-langchain-google-genai==2.1.12
+sentence-transformers==5.1.1
+langchain-huggingface==1.2.0
