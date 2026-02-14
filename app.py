@@ -3,23 +3,19 @@
 # ===============================
 
 import os
-from dotenv import load_dotenv
-
 import pandas as pd
 import gradio as gr
 
 from langchain_chroma import Chroma
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
-load_dotenv()
 
 # ===============================
-# UX Validation (NOT ranking logic)
+# UX Validation
 # ===============================
 
 
-def validate_query(query: str) -> tuple[bool, str]:
-    """Minimal UX validation. Does not affect ranking."""
+def validate_query(query: str):
     clean = query.strip()
 
     if len(clean) < 5:
@@ -30,97 +26,69 @@ def validate_query(query: str) -> tuple[bool, str]:
 
     words = clean.split()
     if len(words) >= 3:
-        unique_ratio = len(set(words)) / len(words)
-        if unique_ratio < 0.3:
+        if len(set(words)) / len(words) < 0.3:
             return False, "Your query seems repetitive. Try rephrasing it."
 
     return True, ""
 
 
 # ===============================
-# UX Warnings (intentionally minimal)
+# Category Classification (Offline)
 # ===============================
 
 
-def check_contradictions(query: str, category: str, tone: str) -> str:
-    """
-    UX hints only.
-    Most contradictions (e.g., dark romance) are legitimate,
-    so we rely on semantic search instead.
-    """
-    return ""
-
-
-# ===============================
-# Category Classification (OFFLINE)
-# ===============================
-
-
-def classify_category(raw_category):
-    """Run once during preprocessing. Never at runtime."""
-    if pd.isna(raw_category):
+def classify_category(raw):
+    if pd.isna(raw):
         return "Other"
 
-    cat = str(raw_category).lower()
+    r = raw.lower()
 
-    if any(x in cat for x in ["young adult", "ya", "children"]):
-        return "Children & YA"
-    if any(x in cat for x in ["mystery", "thriller", "crime", "detective", "horror"]):
-        return "Mystery & Thriller"
-    if "romance" in cat:
+    if "romance" in r:
         return "Romance"
-    if any(x in cat for x in ["fantasy", "science fiction", "sci-fi", "dystopian"]):
+    if any(x in r for x in ["thriller", "mystery", "crime", "horror"]):
+        return "Mystery & Thriller"
+    if any(x in r for x in ["fantasy", "science fiction", "sci-fi"]):
         return "Fantasy & Sci-Fi"
-    if any(x in cat for x in ["history", "biography", "memoir"]):
+    if any(x in r for x in ["history", "biography", "memoir"]):
         return "History & Biography"
-    if any(x in cat for x in ["business", "self-help", "finance"]):
+    if any(x in r for x in ["business", "self-help"]):
         return "Self-Help & Business"
-    if any(x in cat for x in ["philosophy", "psychology", "physics", "biology"]):
-        return "Science & Ideas"
 
     return "Literary & Contemporary"
 
 
 # ===============================
-# Data Loading (Preprocessed)
+# Load Data
 # ===============================
 
-ENRICHED_FILE = "books_enriched_production.csv"
-
-if os.path.exists(ENRICHED_FILE):
-    books = pd.read_csv(ENRICHED_FILE)
+if os.path.exists("books_enriched_production.csv"):
+    books = pd.read_csv("books_enriched_production.csv")
 else:
     books = pd.read_csv("books_with_emotions.csv")
     books["category"] = books["categories"].apply(classify_category)
-    books.to_csv(ENRICHED_FILE, index=False)
+    books.to_csv("books_enriched_production.csv", index=False)
 
-print(f"Loaded {len(books)} books")
-
-books["large_thumbnail"] = books["thumbnail"].astype(str) + "&fife=w800"
+books["thumbnail"] = books["thumbnail"].fillna("")
+books["large_thumbnail"] = books["thumbnail"] + "&fife=w800"
 books["large_thumbnail"] = books["large_thumbnail"].replace(
-    {"nan&fife=w800": "cover-not-found.jpg"}
+    {"&fife=w800": "cover-not-found.jpg"}
 )
 
+
 # ===============================
-# Vector Database
+# Vector DB (HuggingFace)
 # ===============================
 
-api_key = os.getenv("GOOGLE_API_KEY")
-if not api_key:
-    raise ValueError("GOOGLE_API_KEY not set")
+embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-embeddings = GoogleGenerativeAIEmbeddings(
-    model="models/text-embedding-004",
-    google_api_key=api_key,
-)
-
-db_books = Chroma(
+db = Chroma(
     persist_directory="chroma_books_Database",
     embedding_function=embeddings,
 )
 
+
 # ===============================
-# Tone Matching (5-tone system)
+# Tone Profiles
 # ===============================
 
 TONE_PROFILES = {
@@ -135,158 +103,267 @@ TONE_PROFILES = {
 
 
 def compute_tone_score(row, tone):
-    if tone == "All" or tone not in TONE_PROFILES:
+    if tone == "All":
         return 0.5
 
     profile = TONE_PROFILES[tone]
-    score = sum(row.get(e, 0.5) * w for e, w in profile.items())
-    return score / sum(profile.values())
+    return sum(row.get(e, 0.5) * w for e, w in profile.items()) / sum(profile.values())
 
 
 # ===============================
-# Keyword Boost (Exact-match tiebreaker)
+# Retrieval
 # ===============================
 
 
-def compute_keyword_boost(desc, query):
-    """
-    Exact keyword match bonus: 5% per matching term, max 20%.
-    Helps technical queries like 'quantum mechanics textbook'.
-    """
-    if pd.isna(desc):
-        return 0.0
+def retrieve_recommendations(query, category, tone):
+    valid, msg = validate_query(query)
+    if not valid:
+        return pd.DataFrame(), msg
 
-    desc_lower = desc.lower()
-    terms = [t for t in query.lower().split() if len(t) >= 3]
-
-    if not terms:
-        return 0.0
-
-    matches = sum(1 for t in terms if t in desc_lower)
-    return min(0.2, matches * 0.05)
-
-
-# ===============================
-# Core Retrieval & Scoring
-# ===============================
-
-
-def retrieve_recommendations(query, category, tone, top_k=16):
-    is_valid, error_msg = validate_query(query)
-    if not is_valid:
-        return pd.DataFrame(), error_msg
-
-    results = db_books.similarity_search_with_relevance_scores(query, k=800)
-
+    results = db.similarity_search_with_relevance_scores(query, k=800)
     scores = {}
+
     for doc, score in results:
         try:
-            isbn = int(doc.page_content.split()[0].replace('"', ""))
+            isbn = int(doc.page_content.split()[0])
             scores[isbn] = score
         except:
             continue
 
     df = books[books["isbn13"].isin(scores.keys())].copy()
+
     if df.empty:
         return df, ""
 
-    # ---- Semantic similarity (normalized) ----
     df["semantic"] = df["isbn13"].map(scores)
-    sem_min, sem_max = df["semantic"].min(), df["semantic"].max()
-    if sem_max > sem_min:
-        df["semantic"] = (df["semantic"] - sem_min) / (sem_max - sem_min)
-    else:
-        df["semantic"] = 0.5
+    smin, smax = df["semantic"].min(), df["semantic"].max()
+    df["semantic"] = (df["semantic"] - smin) / (smax - smin) if smax > smin else 0.5
 
-    # ---- Tone match ----
     df["tone"] = df.apply(lambda r: compute_tone_score(r, tone), axis=1)
 
-    # ---- Category match ----
-    if category != "All":
-        df["category_match"] = df["category"].eq(category).astype(float)
-    else:
-        df["category_match"] = 0.0
+    df["category_match"] = (
+        df["category"].eq(category).astype(float) if category != "All" else 0.0
+    )
 
-    # ---- Keyword boost ----
-    df["keyword"] = df["description"].apply(lambda d: compute_keyword_boost(d, query))
-
-    # ---- Final score ----
     if category == "All":
-        df["final_score"] = (
-            0.85 * df["semantic"] + 0.10 * df["tone"] + 0.05 * df["keyword"]
-        )
+        df["final_score"] = 0.85 * df["semantic"] + 0.15 * df["tone"]
     else:
         df["final_score"] = (
-            0.65 * df["semantic"]
-            + 0.20 * df["category_match"]
-            + 0.10 * df["tone"]
-            + 0.05 * df["keyword"]
+            0.65 * df["semantic"] + 0.20 * df["category_match"] + 0.15 * df["tone"]
         )
 
-    return df.sort_values("final_score", ascending=False).head(top_k), ""
+    return df.sort_values("final_score", ascending=False).head(16), ""
 
 
 # ===============================
-# Gradio UI
+# UI Styling
 # ===============================
+
+custom_css = """
+/* Hide Gradio branding and footer */
+footer {
+    display: none !important;
+}
+
+.gradio-container .footer {
+    display: none !important;
+}
+
+a[href*="gradio.app"] {
+    display: none !important;
+}
+
+/* Hide recording button and related UI */
+button[aria-label*="Record"] {
+    display: none !important;
+}
+
+button[aria-label*="Stop"] {
+    display: none !important;
+}
+
+.record-button {
+    display: none !important;
+}
+
+/* Hide upload area completely */
+.image-container .upload-container {
+    display: none !important;
+}
+
+.image-container [data-testid="image-upload-button"] {
+    display: none !important;
+}
+
+/* Hide all icon buttons */
+.image-container .icon-buttons {
+    display: none !important;
+}
+
+.image-container button[aria-label] {
+    display: none !important;
+}
+
+div[data-testid="image"] button {
+    display: none !important;
+}
+
+.image-container .download-button,
+.image-container .share-button,
+.image-container .fullscreen-button {
+    display: none !important;
+}
+
+/* Make images fill space and clickable */
+.image-container {
+    padding: 0 !important;
+}
+
+.image-container img {
+    object-fit: cover !important;
+    width: 100% !important;
+    height: 100% !important;
+    border-radius: 12px;
+    cursor: pointer;
+}
+
+.gr-column {
+    padding: 4px !important;
+}
+
+/* Hover effect */
+.image-container:hover img {
+    transform: scale(1.02);
+    transition: transform 0.2s ease;
+}
+"""
+
+
+# ===============================
+# UI Layout
+# ===============================
+
+categories = ["All"] + sorted(books["category"].unique())
+tones = ["All"] + list(TONE_PROFILES.keys())
 
 current_recommendations = []
 
+with gr.Blocks(theme=gr.themes.Ocean(), css=custom_css) as app:
 
-def search_books(query, category, tone):
-    global current_recommendations
-
-    warning = check_contradictions(query, category, tone)
-    df, error_msg = retrieve_recommendations(query, category, tone)
-
-    if error_msg:
-        gr.Warning(error_msg)
-        return [None] * 16
-
-    if warning:
-        gr.Warning(warning)
-
-    current_recommendations = df.reset_index(drop=True)
-    return [df.iloc[i]["large_thumbnail"] if i < len(df) else None for i in range(16)]
-
-
-def show_details(index):
-    idx = int(index)
-    if idx >= len(current_recommendations):
-        return [None, "", "", "", "", "", "", gr.update(visible=False)]
-
-    row = current_recommendations.iloc[idx]
-
-    return (
-        row["large_thumbnail"],
-        f"## {row['title']}",
-        f"**Authors:** {row['authors']}",
-        f"**Rating:** {row['average_rating']}",
-        f"**Published:** {row['published_year']}",
-        f"**Category:** {row['category']}",
-        f"### Description\n{row.get('description','')[:800]}...",
-        gr.update(visible=True),
-    )
-
-
-# ===============================
-# Launch App
-# ===============================
-
-categories = ["All"] + sorted(books["category"].dropna().unique())
-tones = ["All"] + list(TONE_PROFILES.keys())
-
-with gr.Blocks(theme=gr.themes.Ocean()) as app:
-    gr.Markdown("# LitMatch: Semantic Book Recommendations")
+    gr.Markdown("# 📚 LitMatch: Semantic Book Recommendations")
 
     with gr.Row():
-        query = gr.Textbox(label="Describe a book")
-        category = gr.Dropdown(categories, value="All")
-        tone = gr.Dropdown(tones, value="All")
-        btn = gr.Button("Search")
+        q = gr.Textbox(
+            label="Describe a book",
+            placeholder="e.g., A mystery novel set in Victorian London",
+            scale=3,
+        )
+        c = gr.Dropdown(categories, value="All", label="Genre")  # Changed from default
+        t = gr.Dropdown(tones, value="All", label="Mood")  # Changed from default
+        btn = gr.Button("Search", variant="primary")
 
-    images = [gr.Image(height=250) for _ in range(16)]
-    btn.click(search_books, [query, category, tone], images)
+    # ================= GRID VIEW =================
+    with gr.Column() as grid_view:
+        images = []
+
+        for r in range(4):
+            with gr.Row():
+                for col in range(4):
+                    idx = r * 4 + col
+                    img = gr.Image(
+                        height=320,  # Increased from 260
+                        show_label=False,
+                        show_download_button=False,
+                        show_share_button=False,
+                        show_fullscreen_button=False,
+                        interactive=False,  # Changed to False to prevent upload
+                        container=False,
+                    )
+                    images.append(img)
+
+    # ================= DETAIL VIEW =================
+    with gr.Column(visible=False) as detail_view:
+
+        back_btn = gr.Button("← Back to Results")
+
+        with gr.Row():
+            with gr.Column(scale=1):
+                cover = gr.Image(
+                    height=600,  # Increased from 500
+                    show_label=False,
+                    show_download_button=False,
+                    show_share_button=False,
+                    show_fullscreen_button=False,
+                    interactive=False,
+                )
+
+            with gr.Column(scale=2):
+                title_md = gr.Markdown()
+                authors_md = gr.Markdown()
+                rating_md = gr.Markdown()
+                year_md = gr.Markdown()
+                category_md = gr.Markdown()
+                gr.Markdown("---")
+                desc_md = gr.Markdown()
+
+    # ================= LOGIC =================
+
+    def search_and_show(query, category, tone):
+        global current_recommendations
+
+        df, err = retrieve_recommendations(query, category, tone)
+
+        if err:
+            gr.Warning(err)
+            return [None] * 16
+
+        current_recommendations = df.reset_index(drop=True)
+
+        return [
+            df.iloc[i]["large_thumbnail"] if i < len(df) else None for i in range(16)
+        ]
+
+    def open_details(idx):
+        if idx >= len(current_recommendations):
+            return [gr.update()] * 9
+
+        row = current_recommendations.iloc[idx]
+
+        return (
+            gr.update(visible=False),
+            gr.update(visible=True),
+            row["large_thumbnail"],
+            f"## {row['title']}",
+            f"**Authors:** {row['authors']}",
+            f"**Rating:** {row['average_rating']:.1f} ⭐",
+            f"**Published:** {row['published_year']}",
+            f"**Category:** {row['category']}",
+            row.get("description", "No description available."),
+        )
+
+    def go_back():
+        return gr.update(visible=True), gr.update(visible=False)
+
+    btn.click(search_and_show, [q, c, t], images)
+
+    for i in range(16):
+        images[i].select(
+            lambda idx=i: open_details(idx),
+            outputs=[
+                grid_view,
+                detail_view,
+                cover,
+                title_md,
+                authors_md,
+                rating_md,
+                year_md,
+                category_md,
+                desc_md,
+            ],
+        )
+
+    back_btn.click(go_back, outputs=[grid_view, detail_view])
+
 
 if __name__ == "__main__":
     app.launch()
