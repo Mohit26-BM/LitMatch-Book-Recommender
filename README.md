@@ -1,42 +1,30 @@
-# Semantic Book Recommendation System
+# LitMatch - Semantic Book Recommendation System
 
-An AI-powered book recommendation system that understands natural language queries using semantic embeddings instead of simple keyword matching.
+An AI-powered book recommendation engine that uses semantic search and emotion-based filtering to help readers discover books they'll love.
 
-## Overview
-This project allows users to search for books by describing what they want to read. The system retrieves relevant books using vector similarity search and refines results using category classification, emotion-based tone matching, and lightweight rule-based logic.
+## 🚀 Live Demo
+[Try it here](https://huggingface.co/spaces/Mohit26BM/LitMatch-Recommender)
 
-## Key Features
-- Semantic search using transformer-based embeddings
-- Vector similarity search with ChromaDB
-- Rule-based category classification (deterministic and fast)
-- Emotion and tone-based filtering (Happy, Sad, Calm, Intense, Dark, Hopeful, Wholesome)
-- Contradiction detection between query, category, and tone
-- Interactive web interface built with Gradio
-- Manual test suite for validating relevance and behavior
+## Features
+- **Semantic Search**: Natural language queries like "a thriller about AI"
+- **Emotion Filtering**: Find books by mood (Happy, Dark, Intense, etc.)
+- **5,000+ Books**: Curated dataset with ratings and descriptions
+- **Smart Ranking**: Hybrid algorithm combining similarity, genre, and tone
 
 ## Tech Stack
-- Python
-- LangChain
-- ChromaDB
-- Google Gemini Embeddings
-- Pandas
-- Gradio
+- **Frontend**: Gradio
+- **ML/NLP**: LangChain, Sentence Transformers, ChromaDB
+- **Embeddings**: all-MiniLM-L6-v2
+- **Deployment**: Hugging Face Spaces
 
 ## How It Works
-1. User enters a natural language query describing a book
-2. The query is validated to handle gibberish, repetition, and edge cases
-3. The query is embedded using transformer-based embeddings
-4. ChromaDB performs vector similarity search to retrieve candidate books
-5. Results are re-ranked using:
-   - Category match score
-   - Emotion-based tone similarity
-   - Keyword overlap boost
-6. Final ranked recommendations are displayed in the UI
+1. User enters natural language query
+2. Query embedded using Sentence Transformers
+3. Vector similarity search in ChromaDB
+4. Results ranked by semantic match + genre + emotional tone
+5. Top 16 recommendations displayed
 
-## Project Structure
-- app.py: Main application logic and Gradio UI
-- books_with_emotions.csv: Source dataset with metadata and emotion scores
-- books_enriched_production.csv: Cached dataset with classified categories
-- chroma_books_Database/: Vector database (not tracked in GitHub)
-- requirements.txt: Python dependencies
-- .env: API keys (not committed)
+## Key Achievements
+- Processed 5,000+ book descriptions into vector embeddings
+- Achieved sub-second query response times
+- Built intuitive UI with zero ML knowledge required for users
