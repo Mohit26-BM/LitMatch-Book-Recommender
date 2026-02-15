@@ -2,7 +2,7 @@
 
 An AI-powered book recommendation engine that uses semantic search and emotion-based filtering to help readers discover books they'll love.
 
-## 🚀 Live Demo
+## Live Demo
 [Try it here](https://huggingface.co/spaces/Mohit26BM/LitMatch-Recommender)
 
 ## Features
