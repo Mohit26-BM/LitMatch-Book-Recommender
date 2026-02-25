@@ -1,4 +1,4 @@
-# LitMatch - Semantic Book Recommendation System
+# LitMatch - Find Your Next Book
 
 An AI-powered book recommendation engine that uses semantic search and emotion-based filtering to help readers discover books they'll love.
 
