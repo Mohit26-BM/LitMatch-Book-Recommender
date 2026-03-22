@@ -27,4 +27,4 @@ An AI-powered book recommendation engine that uses semantic search and emotion-b
 ## Key Achievements
 - Processed 5,000+ book descriptions into vector embeddings
 - Achieved sub-second query response times
-- Built intuitive UI with zero ML knowledge required for users
+- Built intuitive UI with zero ML knowledge required for users to explore 
